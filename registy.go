@@ -1,32 +1,36 @@
-package main
+package hyperloglog
 
 import (
+    "fmt"
     "log"
 )
 
-//HyperLogLog probabilistic cardinality approximation.
-
-
 const (
-    bucketCount uint32 = 1024 // the m count
-    bucketBits uint32 = 10 // 2**10 = 1024
+    loglog2Capcity uint32 = 6 // rep 64, you can count up to 2**64 objects
 )
 
 type registry struct {
-    loglog2Capcity uint32 // if 6, then rep 64, you can count up to 2**64 objects
     m []uint32
 }
 
-func newRegistry(capacityAsLeadingZeros uint32) *registry {
-    if capacityAsLeadingZeros < 4 || capacityAsLeadingZeros > 6 {
-        panic("capacityAsLeadingZeros should be 4, 5, or 6, represent cardinality up to 2**16, 2*32, 2**64")
+func newRegistry(bucketCount uint32) *registry {
+    if bucketCount == 0 || bucketCount > 16384 {
+        panic("bucketCount should be [1, 16384]")
+    }
+
+    if bucketCount & (bucketCount -1) != 0 {
+        panic("bucketCount should be power of 2")
     }
 
     reg := &registry{}
-    reg.loglog2Capcity = capacityAsLeadingZeros
-    reg.m = make([]uint32, calcSizeOfUint32(bucketCount, reg.loglog2Capcity))
+    reg.m = make([]uint32, calcSizeOfUint32(bucketCount, loglog2Capcity))
 
     return reg
+}
+
+func (reg *registry)bucketCount() uint32 {
+    l := uint32(len(reg.m))
+    return l * (32 / loglog2Capcity)
 }
 
 func calcSizeOfUint32(bucketCount uint32, loglog2Capcity uint32) uint32 {
@@ -39,70 +43,57 @@ func calcSizeOfUint32(bucketCount uint32, loglog2Capcity uint32) uint32 {
 }
 
 func (reg *registry)set(position uint32, leadingZeros uint32) {
-    if position >= bucketCount {
-        panic("position should be [0, 1024)")
+    if position >= reg.bucketCount() {
+        panic(fmt.Sprintf("wrong position %v, expect < %v", position, reg.bucketCount()))
     }
 
-    if leadingZeros > (1 << reg.loglog2Capcity) {
+    if leadingZeros > 64 {
         panic("wrong leadingZeros")
     }
 
-    bucket := position / (32 / reg.loglog2Capcity)
-    shift := reg.loglog2Capcity * (position - bucket * (32 / reg.loglog2Capcity))
+    bucket := position / (32 / loglog2Capcity)
+    shift := loglog2Capcity * (position - bucket * (32 / loglog2Capcity))
 
-    var leadingZerosMask uint32 = (1 << reg.loglog2Capcity) - 1
+    var leadingZerosMask uint32 = (1 << loglog2Capcity) - 1
     reg.m[bucket] = (reg.m[bucket] & ^(leadingZerosMask << shift)) | (leadingZeros << shift)
 }
 
 func (reg *registry)get(position uint32) uint32 {
-    if position >= bucketCount {
-        panic("position should be [0, 1024)")
+    if position >= reg.bucketCount() {
+        panic(fmt.Sprintf("wrong position %v, expect < %v", position, reg.bucketCount()))
     }
 
-    bucket := position / (32 / reg.loglog2Capcity)
-    shift := reg.loglog2Capcity * (position - bucket * (32 / reg.loglog2Capcity))
+    bucket := position / (32 / loglog2Capcity)
+    shift := loglog2Capcity * (position - bucket * (32 / loglog2Capcity))
 
-    var leadingZerosMask uint32 = (1 << reg.loglog2Capcity) - 1
+    var leadingZerosMask uint32 = (1 << loglog2Capcity) - 1
     return (reg.m[bucket] & (leadingZerosMask << shift)) >> shift
 }
 
-func (reg *registry)update(position uint32, leadingZeros uint32) {
+func (reg *registry)update(position uint32, leadingZeros uint32) bool {
     var curVal uint32 = reg.get(position)
     if curVal < leadingZeros {
         reg.set(position, leadingZeros)
+        return true
     }
+
+    return false
 }
 
-
 func (reg *registry)merge(other *registry) {
-    if reg.loglog2Capcity != other.loglog2Capcity ||
-       len(reg.m) != len(other.m) {
-        panic("xx")
+    if len(reg.m) != len(other.m) {
+        panic("m should be same for merge")
     }
 
-    for bucket := uint32(0); bucket < bucketCount; bucket++ {
+    for bucket := uint32(0); bucket < reg.bucketCount(); bucket++ {
         me := reg.get(bucket)
         he := other.get(bucket)
+        if me != 0 || he != 0 {
+            log.Printf("%v %v %v\n", bucket, me, he)
+        }
         if he > me {
             reg.set(bucket, he)
         }
     }
-}
-
-// type hyper log
-
-func main() {
-    reg := newRegistry(6)
-    reg.set(1000, 30)
-    log.Println(reg.get(1000))
-
-    reg.set(0, 20)
-    log.Println(reg.get(0))
-
-    reg.update(1000, 30)
-    log.Println(reg.get(1000))
-
-    reg.update(0, 25)
-    log.Println(reg.get(0))
 }
 
