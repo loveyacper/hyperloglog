@@ -77,6 +77,10 @@ func (hll *HyperLoglog) Count() int {
 	return int(math.Ceil(estimate))
 }
 
+func (hll *HyperLoglog) Merge(other *HyperLoglog) {
+	hll.reg.merge(other.reg)
+}
+
 func getAlphaMM(p int, m float64) float64 {
 	// See the paper.
 	if p < 4 || p > 16 {

@@ -58,15 +58,29 @@ func TestRegistry(t *testing.T) {
 }
 
 func TestMerge(t *testing.T) {
-	reg := newRegistry(1024)
-	reg.set(100, 30)
+	n := 100000
+	off := 0
 
-	reg2 := newRegistry(1024)
-	reg2.set(100, 20)
+	hll := NewHyperLoglog(16384) // bias: 1.04/128 = 0.81%
+	for ; off < n/2; off++ {
+		b := randBytes(128)
+		hll.Add(b)
+	}
 
-	reg.merge(reg2)
-	if v := reg.get(100); v != 30 {
-		t.Errorf("wrong %v expect 30", v)
+	other := NewHyperLoglog(16384)
+	for ; off < n; off++ {
+		b := randBytes(128)
+		other.Add(b)
+	}
+
+	hll.Merge(other)
+	esti := hll.Count()
+
+	bias := float64(esti-n) / float64(n)
+	bias = math.Abs(bias * 100)
+	t.Logf("bias %.2f%%: real %d, estimate %d", bias, n, esti)
+	if bias > 5.0 {
+		t.Errorf("bias %.2f%%, should not exceed 5%%", bias)
 	}
 }
 
